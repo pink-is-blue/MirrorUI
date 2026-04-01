@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 
-const API_BASE = import.meta.env.VITE_API_BASE || ''
+const BUILD_API_BASE = import.meta.env.VITE_API_BASE || ''
+const LS_KEY = 'mirrorui_api_base'
 const GENERATED_ENTRY = './components/generated/AppBody.jsx'
 
 const BENCHMARK_DEFAULTS = {
@@ -86,6 +87,9 @@ function CodeTabs({ files }) {
 
 function App() {
   const [url, setUrl] = useState('https://example.com')
+  const [apiBase, setApiBase] = useState(() => localStorage.getItem(LS_KEY) ?? BUILD_API_BASE)
+  const [showApiConfig, setShowApiConfig] = useState(false)
+  const [apiBaseInput, setApiBaseInput] = useState(() => localStorage.getItem(LS_KEY) ?? BUILD_API_BASE)
   const [loading, setLoading] = useState(false)
   const [loadingStep, setLoadingStep] = useState(0)
   const [loadingMsg, setLoadingMsg] = useState('Generating...')
@@ -101,12 +105,21 @@ function App() {
   const [compareMode, setCompareMode] = useState('side')
   const [overlayOpacity, setOverlayOpacity] = useState(0.1)
 
+  function saveApiBase(val) {
+    const trimmed = val.replace(/\/$/, '').trim()
+    setApiBase(trimmed)
+    setApiBaseInput(trimmed)
+    localStorage.setItem(LS_KEY, trimmed)
+    setShowApiConfig(false)
+    setError('')
+  }
+
   const generatedCount = useMemo(() => (result?.written || []).length, [result])
   const screenshotUrl = useMemo(() => {
-    if (!result?.screenshot) return `${API_BASE}/api/screenshot`
+    if (!result?.screenshot) return `${apiBase}/api/screenshot`
     const ts = Date.now()
-    return `${API_BASE}/api/screenshot?t=${ts}`
-  }, [result])
+    return `${apiBase}/api/screenshot?t=${ts}`
+  }, [result, apiBase])
 
   const nodesById = useMemo(() => {
     const map = new Map()
@@ -137,8 +150,8 @@ function App() {
     async function bootstrapGeneratedState() {
       try {
         const [layoutRes, codeRes] = await Promise.all([
-          fetch(`${API_BASE}/api/layout`),
-          fetch(`${API_BASE}/api/code`),
+          fetch(`${apiBase}/api/layout`),
+          fetch(`${apiBase}/api/code`),
         ])
 
         if (cancelled) return
@@ -171,12 +184,12 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [apiBase])
 
   async function refreshLayoutAndCode() {
     const [layoutRes, codeRes] = await Promise.all([
-      fetch(`${API_BASE}/api/layout`),
-      fetch(`${API_BASE}/api/code`),
+      fetch(`${apiBase}/api/layout`),
+      fetch(`${apiBase}/api/code`),
     ])
     if (layoutRes.ok) {
       const payload = await readApiPayload(layoutRes)
@@ -209,7 +222,7 @@ function App() {
     setLoadingMsg(GENERATION_STEPS[0])
 
     try {
-      const res = await fetch(`${API_BASE}/api/generate`, {
+      const res = await fetch(`${apiBase}/api/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url }),
@@ -234,7 +247,7 @@ function App() {
         setLoadingStep(stepIdx)
         setLoadingMsg(`${GENERATION_STEPS[stepIdx]} (${elapsed}s)`)
 
-        const pollRes = await fetch(`${API_BASE}/api/job/${jobId}`)
+        const pollRes = await fetch(`${apiBase}/api/job/${jobId}`)
         const pollData = await readApiPayload(pollRes)
 
         if (pollData.status === 'done') {
@@ -265,7 +278,7 @@ function App() {
     setBenchmarkLoading(true)
     setError('')
     try {
-      const res = await fetch(`${API_BASE}/api/benchmark`, {
+      const res = await fetch(`${apiBase}/api/benchmark`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ urls: BENCHMARK_DEFAULTS }),
@@ -287,7 +300,7 @@ function App() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch(`${API_BASE}/api/editor/update-node`, {
+      const res = await fetch(`${apiBase}/api/editor/update-node`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -328,6 +341,41 @@ function App() {
           <p>Generate pixel-faithful editable React + Tailwind from any URL. Benchmark across Simple / Medium / Complex tiers.</p>
         </section>
 
+        {/* Backend URL configurator */}
+        <div className="api-config-bar">
+          <span className="api-config-label">
+            🔌 Backend:{' '}
+            <code className={`api-base-display ${apiBase ? 'connected' : 'not-set'}`}>
+              {apiBase || 'not configured'}
+            </code>
+          </span>
+          <button type="button" className="secondary api-config-btn" onClick={() => setShowApiConfig((v) => !v)}>
+            {showApiConfig ? 'Cancel' : '⚙ Configure'}
+          </button>
+        </div>
+
+        {showApiConfig && (
+          <div className="api-config-panel">
+            <p className="hint">
+              The frontend is hosted on GitHub Pages (static). The Python backend must run separately.
+              <br />
+              Run <code>uvicorn main:app --host 0.0.0.0 --port 8000</code> locally or in Codespaces, then paste its public URL below.
+            </p>
+            <div className="row">
+              <input
+                value={apiBaseInput}
+                onChange={(e) => setApiBaseInput(e.target.value)}
+                placeholder="http://localhost:8000  or  https://your-tunnel-url.com"
+              />
+              <button type="button" onClick={() => saveApiBase(apiBaseInput)}>Save</button>
+            </div>
+            <div className="api-hints">
+              <button type="button" className="secondary" onClick={() => saveApiBase('http://localhost:8000')}>localhost:8000</button>
+              <button type="button" className="secondary" onClick={() => saveApiBase('')}>Clear (same-origin)</button>
+            </div>
+          </div>
+        )}
+
         <form onSubmit={onGenerate} className="controls">
           <label htmlFor="url">Target URL</label>
           <div className="row">
@@ -348,9 +396,9 @@ function App() {
             <button type="button" onClick={onRunBenchmarks} className="secondary" disabled={benchmarkLoading}>
               {benchmarkLoading ? 'Running…' : '📊 Benchmark'}
             </button>
-            <a href={`${API_BASE}/api/export`} target="_blank" rel="noreferrer" className="secondary link-btn">⬇ Export Zip</a>
-            <a href={`${API_BASE}/api/screenshot`} target="_blank" rel="noreferrer" className="secondary link-btn">📸 Screenshot</a>
-            <a href={`${API_BASE}/docs`} target="_blank" rel="noreferrer" className="secondary link-btn">📖 API Docs</a>
+            <a href={`${apiBase}/api/export`} target="_blank" rel="noreferrer" className="secondary link-btn">⬇ Export Zip</a>
+            <a href={`${apiBase}/api/screenshot`} target="_blank" rel="noreferrer" className="secondary link-btn">📸 Screenshot</a>
+            <a href={`${apiBase}/docs`} target="_blank" rel="noreferrer" className="secondary link-btn">📖 API Docs</a>
           </div>
         </form>
 
