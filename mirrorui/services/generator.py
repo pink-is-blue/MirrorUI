@@ -194,6 +194,9 @@ export default function SectionList() {
                 "children": synthetic_children,
             }
 
+        if self._count_tree_nodes(tree_root) < 24:
+            tree_root = self._build_sparse_fallback(nodes, root_x, root_y, page_width)
+
         return {
             "title": extracted.get("title") or "MirrorUI Output",
             "width": int(page_width),
@@ -201,6 +204,67 @@ export default function SectionList() {
             "backgroundColor": self._pick_root_background(root, nodes),
             "screenshotUrl": "/api/screenshot",
             "root": tree_root,
+        }
+
+    def _count_tree_nodes(self, node: Dict[str, Any]) -> int:
+        if not node:
+            return 0
+        total = 1
+        for child in node.get("children", []):
+            total += self._count_tree_nodes(child)
+        return total
+
+    def _build_sparse_fallback(self, nodes: List[Dict[str, Any]], root_x: float, root_y: float, page_width: float) -> Dict[str, Any]:
+        ranked = sorted(nodes, key=lambda n: float(n.get("importance", 0.0)), reverse=True)
+        children: List[Dict[str, Any]] = []
+
+        for node in ranked[:180]:
+            if not self._should_keep(node, dense=True):
+                continue
+            box = node.get("box", {})
+            left = max(0.0, float(box.get("x", 0.0)) - root_x)
+            top = max(0.0, float(box.get("y", 0.0)) - root_y)
+            width = max(0.0, float(box.get("width", 0.0)))
+            height = max(0.0, float(box.get("height", 0.0)))
+            if width < 6 or height < 6:
+                continue
+
+            styles = self._pick_styles(node.get("styles", {}))
+            styles["position"] = "absolute"
+            styles["left"] = f"{left:.2f}px"
+            styles["top"] = f"{top:.2f}px"
+            styles["width"] = f"{width:.2f}px"
+            styles["height"] = f"{height:.2f}px"
+
+            children.append(
+                {
+                    "node_id": node.get("node_id", ""),
+                    "tag": self._normalize_tag(node.get("tag", "div")),
+                    "text": (node.get("text") or "").strip()[:220],
+                    "attrs": self._pick_attrs(node.get("attrs", {})),
+                    "styles": styles,
+                    "classes": node.get("classes", []),
+                    "children": [],
+                }
+            )
+
+        return {
+            "node_id": "root_sparse",
+            "tag": "main",
+            "text": "",
+            "attrs": {},
+            "styles": {
+                "position": "relative",
+                "width": "100%",
+                "maxWidth": f"{max(320.0, page_width):.2f}px",
+                "minHeight": "900px",
+                "marginTop": "0px",
+                "marginRight": "0px",
+                "marginBottom": "0px",
+                "marginLeft": "0px",
+            },
+            "classes": [],
+            "children": children,
         }
 
     def _pick_root(self, nodes: List[Dict[str, Any]], viewport: Dict[str, Any]) -> Dict[str, Any]:
@@ -229,8 +293,10 @@ export default function SectionList() {
 
     def _should_keep(self, node: Dict[str, Any], dense: bool) -> bool:
         tag = (node.get("tag") or "").lower()
-        if tag in {"html", "body", "head", "script", "style", "meta", "link", "noscript", "path", "svg"}:
+        if tag in {"html", "head", "script", "style", "meta", "link", "noscript", "path", "svg"}:
             return False
+        if tag in {"body", "main"}:
+            return True
 
         box = node.get("box", {})
         width = float(box.get("width", 0.0))

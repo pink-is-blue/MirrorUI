@@ -8,6 +8,10 @@ class GenerateRequest(BaseModel):
     url: str
 
 
+class BenchmarkRequest(BaseModel):
+    urls: Dict[str, str] = Field(default_factory=dict)
+
+
 class DOMNode(BaseModel):
     node_id: str
     tag: str
@@ -19,6 +23,10 @@ class DOMNode(BaseModel):
     children: List[str] = Field(default_factory=list)
     parent_id: Optional[str] = None
     visible: bool = True
+    depth: int = 0
+    order: int = 0
+    interactive: bool = False
+    role_hint: str = ""
 
 
 class CapturePayload(BaseModel):
@@ -28,6 +36,8 @@ class CapturePayload(BaseModel):
     viewport: Dict[str, int]
     html: str
     dom_nodes: List[DOMNode]
+    challenge_detected: bool = False
+    challenge_reason: str = ""
 
 
 class VisualRegion(BaseModel):
@@ -62,6 +72,7 @@ class GenerationCandidate(BaseModel):
     candidate_id: str
     rationale: str
     files: Dict[str, str]
+    artifacts: Dict[str, Any] = Field(default_factory=dict)
 
 
 class GenerationResult(BaseModel):
@@ -72,6 +83,9 @@ class GenerationResult(BaseModel):
     actions: List[Action]
     comparison: Dict[str, Any]
     metrics: Dict[str, Any]
+    warnings: List[str] = Field(default_factory=list)
+    challenge_detected: bool = False
+    challenge_reason: str = ""
 
 
 class EditorUpdateRequest(BaseModel):

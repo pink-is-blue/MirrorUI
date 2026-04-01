@@ -163,7 +163,7 @@ function MirrorNode({ node, selectedNodeId, isRoot = false }) {
   )
 }
 
-export default function MirrorRenderer({ pageData, selectedNodeId = '' }) {
+export default function MirrorRenderer({ pageData, selectedNodeId = '', showReferenceOverlay = true, referenceOpacity = 0.08 }) {
   if (!pageData?.root) {
     return null
   }
@@ -181,7 +181,9 @@ export default function MirrorRenderer({ pageData, selectedNodeId = '' }) {
             backgroundColor: pageData.backgroundColor || 'rgb(255, 255, 255)',
           }}
         >
-          {pageData.screenshotUrl ? <img className="mirror-reference" src={pageData.screenshotUrl} alt="" aria-hidden="true" /> : null}
+          {pageData.screenshotUrl && showReferenceOverlay ? (
+            <img className="mirror-reference" src={pageData.screenshotUrl} alt="" aria-hidden="true" style={{ opacity: referenceOpacity }} />
+          ) : null}
           <MirrorNode node={pageData.root} selectedNodeId={selectedNodeId} isRoot />
         </div>
       </div>

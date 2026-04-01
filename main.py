@@ -11,7 +11,7 @@ from fastapi import BackgroundTasks, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from mirrorui.pipeline import MirrorPipeline
-from mirrorui.schemas import EditorUpdateRequest, GenerateRequest
+from mirrorui.schemas import BenchmarkRequest, EditorUpdateRequest, GenerateRequest
 from zipper import zip_bytes
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -60,6 +60,9 @@ async def _run_generation_job(job_id: str, url: str) -> None:
             "metrics": result.metrics,
             "comparison": result.comparison,
             "actions": [action.model_dump() for action in result.actions],
+            "warnings": result.warnings,
+            "challenge_detected": result.challenge_detected,
+            "challenge_reason": result.challenge_reason,
         }
     except asyncio.TimeoutError:
         _JOBS[job_id] = {
@@ -151,6 +154,22 @@ async def evaluate_latest() -> Dict[str, Any]:
     if not meta:
         return JSONResponse({"error": "No evaluation found. Generate first."}, status_code=404)
     return {"ok": True, "metrics": meta.get("metrics", {}), "comparison": meta.get("comparison", {})}
+
+
+@app.post("/api/benchmark")
+async def benchmark(req: BenchmarkRequest):
+    # 3-tier suite requested by user: simple, medium, complex.
+    defaults = {
+        "simple_stripe": "https://stripe.com",
+        "simple_notion": "https://www.notion.so",
+        "medium_amazon": "https://www.amazon.com",
+        "medium_bbc": "https://www.bbc.com",
+        "complex_apple": "https://www.apple.com",
+        "complex_airbnb": "https://www.airbnb.com",
+    }
+    sites = req.urls or defaults
+    payload = await pipeline.run_benchmark(sites)
+    return {"ok": True, **payload}
 
 
 @app.get("/api/screenshot")

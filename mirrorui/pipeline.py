@@ -77,13 +77,22 @@ class MirrorPipeline:
         single_code = candidates[0].files.get("src/components/generated/AppBody.jsx", "")
         dual_code = verified["files"].get("src/components/generated/AppBody.jsx", "")
 
+        selected_meta = verified["files"].get("src/components/generated/generation.meta.js", "")
+        page_model = self._extract_page_model(selected_meta)
+
         metrics = self.evaluator.evaluate(
             extracted=extracted,
             sections=[section.model_dump() for section in sections],
             generated_code=dual_code,
-            screenshot_path=extracted["screenshot_path"],
+            page_model=page_model,
         )
         comparison = self.evaluator.compare_single_vs_dual(single_code=single_code, dual_code=dual_code)
+
+        warnings = []
+        if extracted.get("challenge_detected"):
+            warnings.append("Potential bot challenge detected. Reconstruction may be partial.")
+        if metrics.get("ssim", 0.0) < 0.45:
+            warnings.append("Low visual similarity. Try regenerating or using a less protected URL path.")
 
         layout_payload: Dict[str, Any] = {
             "title": extracted.get("title", ""),
@@ -108,7 +117,38 @@ class MirrorPipeline:
             actions=actions,
             comparison=comparison,
             metrics=metrics,
+            warnings=warnings,
+            challenge_detected=bool(extracted.get("challenge_detected")),
+            challenge_reason=str(extracted.get("challenge_reason", "")),
         )
+
+    async def run_benchmark(self, sites: Dict[str, str]) -> Dict[str, Any]:
+        runs: Dict[str, Dict[str, Any]] = {}
+        for site_name, site_url in sites.items():
+            try:
+                result = await self.run(site_url)
+                runs[site_name] = {
+                    "url": site_url,
+                    "ok": True,
+                    "title": result.title,
+                    "metrics": result.metrics,
+                    "comparison": result.comparison,
+                    "warnings": result.warnings,
+                    "challenge_detected": result.challenge_detected,
+                }
+            except Exception as exc:
+                runs[site_name] = {
+                    "url": site_url,
+                    "ok": False,
+                    "error": str(exc),
+                    "metrics": {},
+                    "comparison": {},
+                    "warnings": ["Benchmark run failed."],
+                    "challenge_detected": False,
+                }
+
+        summary = self.evaluator.summarize_benchmark(runs)
+        return {"runs": runs, "summary": summary}
 
     def apply_editor_update(self, req: EditorUpdateRequest) -> Dict[str, Any]:
         layout_payload = self.state.load_layout()
@@ -125,3 +165,18 @@ class MirrorPipeline:
         )
         self.state.save_layout(layout_payload)
         return result
+
+    def _extract_page_model(self, generation_meta_code: str) -> Dict[str, Any]:
+        marker = "export const pageData = "
+        idx = generation_meta_code.find(marker)
+        if idx < 0:
+            return {}
+        content = generation_meta_code[idx + len(marker):].strip()
+        if content.endswith(";"):
+            content = content[:-1]
+        try:
+            import json
+
+            return json.loads(content)
+        except Exception:
+            return {}

@@ -1,9 +1,18 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 const GENERATED_ENTRY = './components/generated/AppBody.jsx'
+
+const BENCHMARK_DEFAULTS = {
+  simple_stripe: 'https://stripe.com',
+  simple_notion: 'https://www.notion.so',
+  medium_amazon: 'https://www.amazon.com',
+  medium_bbc: 'https://www.bbc.com',
+  complex_apple: 'https://www.apple.com',
+  complex_airbnb: 'https://www.airbnb.com',
+}
 
 async function readApiPayload(res) {
   const raw = await res.text()
@@ -26,15 +35,25 @@ function App() {
   const [url, setUrl] = useState('https://example.com')
   const [loading, setLoading] = useState(false)
   const [loadingMsg, setLoadingMsg] = useState('Generating...')
+  const [benchmarkLoading, setBenchmarkLoading] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
+  const [benchmarkResult, setBenchmarkResult] = useState(null)
   const [layout, setLayout] = useState(null)
   const [codeFiles, setCodeFiles] = useState({})
   const [selectedNodeId, setSelectedNodeId] = useState('')
   const [editor, setEditor] = useState({ text: '', href: '', image_src: '', class_name: '' })
   const [GeneratedComponent, setGeneratedComponent] = useState(null)
+  const [compareMode, setCompareMode] = useState('overlay')
+  const [overlayOpacity, setOverlayOpacity] = useState(0.1)
 
   const generatedCount = useMemo(() => (result?.written || []).length, [result])
+  const screenshotUrl = useMemo(() => {
+    if (!result?.screenshot) return `${API_BASE}/api/screenshot`
+    const ts = Date.now()
+    return `${API_BASE}/api/screenshot?t=${ts}`
+  }, [result])
+
   const nodesById = useMemo(() => {
     const map = new Map()
     for (const node of layout?.nodes || []) {
@@ -89,7 +108,7 @@ function App() {
           }
         }
       } catch {
-        // Keep the shell usable even if the backend is temporarily unavailable.
+        // Keep shell usable even if API is restarting.
       }
     }
 
@@ -135,7 +154,6 @@ function App() {
     setLoadingMsg('Starting generation...')
 
     try {
-      // Fire the job — returns immediately with a job_id.
       const res = await fetch(`${API_BASE}/api/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -149,10 +167,9 @@ function App() {
       const jobId = data.job_id
       const startedAt = Date.now()
 
-      // Poll until done or error.
       let jobResult = null
       while (true) {
-        await new Promise(r => setTimeout(r, 2000))
+        await new Promise((r) => setTimeout(r, 2000))
         const elapsed = Math.round((Date.now() - startedAt) / 1000)
         setLoadingMsg(`Capturing & generating... (${elapsed}s)`)
 
@@ -166,9 +183,8 @@ function App() {
         if (pollData.status === 'error') {
           throw new Error(pollData.error || 'Generation failed')
         }
-        // still 'running' — keep polling
-        if (elapsed > 180) {
-          throw new Error('Generation is taking too long. The site may be blocking headless browsers.')
+        if (elapsed > 210) {
+          throw new Error('Generation timed out. The site may be blocking headless capture.')
         }
       }
 
@@ -180,6 +196,25 @@ function App() {
     } finally {
       setLoading(false)
       setLoadingMsg('Generating...')
+    }
+  }
+
+  async function onRunBenchmarks() {
+    setBenchmarkLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`${API_BASE}/api/benchmark`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls: BENCHMARK_DEFAULTS }),
+      })
+      const data = await readApiPayload(res)
+      if (!res.ok) throw new Error(data?.error || 'Benchmark run failed')
+      setBenchmarkResult(data)
+    } catch (err) {
+      setError(err.message || 'Benchmark failed')
+    } finally {
+      setBenchmarkLoading(false)
     }
   }
 
@@ -227,9 +262,10 @@ function App() {
       <main className="panel dashboard">
         <section className="hero">
           <p className="kicker">MIRRORUI</p>
-          <h1>Hybrid Vision-AI for Editable Website Interface Reconstruction</h1>
+          <h1>Website Reconstruction Lab</h1>
           <p>
-            URL to editable React + Tailwind with dual-pass proposer-verifier generation.
+            Generate editable React + Tailwind from a URL, compare against captured reference, and benchmark
+            Simple/Medium/Complex tiers.
           </p>
         </section>
 
@@ -254,6 +290,9 @@ function App() {
             <button type="button" onClick={refreshLayoutAndCode} className="secondary">
               Refresh Graph/Code
             </button>
+            <button type="button" onClick={onRunBenchmarks} className="secondary" disabled={benchmarkLoading}>
+              {benchmarkLoading ? 'Running Benchmarks...' : 'Run 3-Tier Benchmark'}
+            </button>
             <a href={`${API_BASE}/api/export`} target="_blank" rel="noreferrer" className="secondary link-btn">
               Export Zip
             </a>
@@ -265,6 +304,18 @@ function App() {
 
         {error && <div className="error">{error}</div>}
 
+        {result?.warnings?.length ? (
+          <section className="warning-panel">
+            <h2>Generation Warnings</h2>
+            <ul>
+              {result.warnings.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+            {result.challenge_detected ? <p>Challenge hint: {result.challenge_reason || 'detected'}</p> : null}
+          </section>
+        ) : null}
+
         {result && (
           <section className="result">
             <p>
@@ -274,35 +325,106 @@ function App() {
               <strong>Files Written:</strong> {generatedCount}
             </p>
             <p>
-              <strong>SSIM:</strong> {result.metrics?.ssim ?? 'n/a'} | <strong>Text Accuracy:</strong>{' '}
-              {result.metrics?.text_accuracy ?? 'n/a'} | <strong>Key Recall:</strong>{' '}
+              <strong>SSIM:</strong> {result.metrics?.ssim ?? 'n/a'} | <strong>Style:</strong>{' '}
+              {result.metrics?.visual_style_similarity ?? 'n/a'} | <strong>Structure:</strong>{' '}
+              {result.metrics?.structure_similarity ?? 'n/a'}
+            </p>
+            <p>
+              <strong>Text Accuracy:</strong> {result.metrics?.text_accuracy ?? 'n/a'} | <strong>Key Recall:</strong>{' '}
               {result.metrics?.key_element_recall ?? 'n/a'} | <strong>A11y:</strong>{' '}
               {result.metrics?.accessibility_score ?? 'n/a'}
             </p>
             <p>
               <strong>Single Pass:</strong> {result.comparison?.single_pass_quality ?? 'n/a'} |{' '}
-              <strong>Dual Pass:</strong> {result.comparison?.dual_pass_quality ?? 'n/a'} |{' '}
-              <strong>Improvement:</strong> {result.comparison?.improvement ?? 'n/a'}
+              <strong>Dual Pass:</strong> {result.comparison?.dual_pass_quality ?? 'n/a'} | <strong>Improvement:</strong>{' '}
+              {result.comparison?.improvement ?? 'n/a'}
             </p>
-            <ul>
-              {(result.written || []).map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
           </section>
         )}
 
+        {benchmarkResult?.summary ? (
+          <section className="benchmark-panel">
+            <h2>3-Tier Benchmark Summary</h2>
+            <p>
+              <strong>Mean SSIM:</strong> {benchmarkResult.summary.mean?.ssim ?? 'n/a'} | <strong>Mean Text:</strong>{' '}
+              {benchmarkResult.summary.mean?.text_accuracy ?? 'n/a'} | <strong>Mean Key Recall:</strong>{' '}
+              {benchmarkResult.summary.mean?.key_element_recall ?? 'n/a'}
+            </p>
+            <div className="benchmark-table-wrap">
+              <table className="benchmark-table">
+                <thead>
+                  <tr>
+                    <th>Site</th>
+                    <th>Score</th>
+                    <th>Challenge</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(benchmarkResult.summary.ranked || []).map((row) => (
+                    <tr key={row.site}>
+                      <td>{row.site}</td>
+                      <td>{row.score}</td>
+                      <td>{benchmarkResult.runs?.[row.site]?.challenge_detected ? 'Yes' : 'No'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
+
         <section className="workspace-grid">
-          <article className="preview" onClick={onPreviewClick}>
-            <h2>Editable Preview</h2>
-            <p className="hint">Click text, links, and cards to edit and sync generated code.</p>
-            {GeneratedComponent ? (
-              <div className="preview-stage">
-                <GeneratedComponent selectedNodeId={selectedNodeId} />
+          <article className="preview compare-workspace" onClick={onPreviewClick}>
+            <div className="compare-head">
+              <h2>Compare Workspace</h2>
+              <div className="compare-controls">
+                <label>
+                  Mode
+                  <select value={compareMode} onChange={(e) => setCompareMode(e.target.value)}>
+                    <option value="overlay">Overlay</option>
+                    <option value="recreated">Recreated Only</option>
+                    <option value="side">Side-by-Side</option>
+                  </select>
+                </label>
+                <label>
+                  Overlay
+                  <input
+                    type="range"
+                    min="0"
+                    max="0.35"
+                    step="0.01"
+                    value={overlayOpacity}
+                    onChange={(e) => setOverlayOpacity(Number(e.target.value))}
+                  />
+                </label>
               </div>
-            ) : (
-              <p>Run generation to load the preview.</p>
-            )}
+            </div>
+            <p className="hint">Click in recreated view to select/edit nodes. Use side-by-side to inspect fidelity quickly.</p>
+
+            {!GeneratedComponent ? <p>Run generation to load the preview.</p> : null}
+
+            {GeneratedComponent && compareMode !== 'side' ? (
+              <div className="preview-stage">
+                <GeneratedComponent
+                  selectedNodeId={selectedNodeId}
+                  showReferenceOverlay={compareMode === 'overlay'}
+                  referenceOpacity={overlayOpacity}
+                />
+              </div>
+            ) : null}
+
+            {GeneratedComponent && compareMode === 'side' ? (
+              <div className="split-compare">
+                <div className="reference-pane">
+                  <h3>Reference Capture</h3>
+                  <img src={screenshotUrl} alt="Reference website capture" />
+                </div>
+                <div className="recreated-pane">
+                  <h3>Recreated Editable UI</h3>
+                  <GeneratedComponent selectedNodeId={selectedNodeId} showReferenceOverlay={false} referenceOpacity={0} />
+                </div>
+              </div>
+            ) : null}
           </article>
 
           <article className="editor-panel">
