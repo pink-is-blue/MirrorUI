@@ -14,12 +14,22 @@ const BENCHMARK_DEFAULTS = {
   complex_airbnb: 'https://www.airbnb.com',
 }
 
+const GENERATION_STEPS = [
+  'Launching browser…',
+  'Capturing screenshot…',
+  'Extracting DOM & styles…',
+  'Building layout graph…',
+  'Segmenting components…',
+  'Running proposer pass…',
+  'Running verifier pass…',
+  'Writing files…',
+]
+
 async function readApiPayload(res) {
   const raw = await res.text()
   if (!raw) {
     return { ok: false, error: `Empty response (HTTP ${res.status})` }
   }
-
   try {
     return JSON.parse(raw)
   } catch {
@@ -31,9 +41,53 @@ async function readApiPayload(res) {
   }
 }
 
+function MetricBadge({ label, value }) {
+  const num = parseFloat(value)
+  const pct = isNaN(num) ? null : Math.round(num * 100)
+  const color = pct === null ? '#64748b' : pct >= 70 ? '#16a34a' : pct >= 45 ? '#ca8a04' : '#dc2626'
+  return (
+    <span className="metric-badge" style={{ '--badge-color': color }}>
+      <span className="metric-label">{label}</span>
+      <span className="metric-value">{pct !== null ? `${pct}%` : value ?? 'n/a'}</span>
+    </span>
+  )
+}
+
+function CodeTabs({ files }) {
+  const entries = Object.entries(files)
+  const [active, setActive] = useState(entries[0]?.[0] || '')
+  useEffect(() => {
+    if (entries.length && !files[active]) setActive(entries[0][0])
+  }, [files])
+
+  if (!entries.length) return <p className="hint">Generate to view code.</p>
+
+  const shortName = (path) => path.split('/').pop()
+
+  return (
+    <div className="code-tabs-wrap">
+      <div className="code-tab-bar">
+        {entries.map(([path]) => (
+          <button
+            key={path}
+            type="button"
+            className={`code-tab ${active === path ? 'code-tab-active' : ''}`}
+            onClick={() => setActive(path)}
+            title={path}
+          >
+            {shortName(path)}
+          </button>
+        ))}
+      </div>
+      <pre className="code-view">{files[active] || ''}</pre>
+    </div>
+  )
+}
+
 function App() {
   const [url, setUrl] = useState('https://example.com')
   const [loading, setLoading] = useState(false)
+  const [loadingStep, setLoadingStep] = useState(0)
   const [loadingMsg, setLoadingMsg] = useState('Generating...')
   const [benchmarkLoading, setBenchmarkLoading] = useState(false)
   const [error, setError] = useState('')
@@ -44,7 +98,7 @@ function App() {
   const [selectedNodeId, setSelectedNodeId] = useState('')
   const [editor, setEditor] = useState({ text: '', href: '', image_src: '', class_name: '' })
   const [GeneratedComponent, setGeneratedComponent] = useState(null)
-  const [compareMode, setCompareMode] = useState('overlay')
+  const [compareMode, setCompareMode] = useState('side')
   const [overlayOpacity, setOverlayOpacity] = useState(0.1)
 
   const generatedCount = useMemo(() => (result?.written || []).length, [result])
@@ -151,7 +205,8 @@ function App() {
     setError('')
     setResult(null)
     setGeneratedComponent(null)
-    setLoadingMsg('Starting generation...')
+    setLoadingStep(0)
+    setLoadingMsg(GENERATION_STEPS[0])
 
     try {
       const res = await fetch(`${API_BASE}/api/generate`, {
@@ -166,12 +221,18 @@ function App() {
 
       const jobId = data.job_id
       const startedAt = Date.now()
+      let pollCount = 0
 
       let jobResult = null
       while (true) {
         await new Promise((r) => setTimeout(r, 2000))
+        pollCount++
         const elapsed = Math.round((Date.now() - startedAt) / 1000)
-        setLoadingMsg(`Capturing & generating... (${elapsed}s)`)
+
+        // Cycle through descriptive steps as we poll
+        const stepIdx = Math.min(pollCount, GENERATION_STEPS.length - 1)
+        setLoadingStep(stepIdx)
+        setLoadingMsg(`${GENERATION_STEPS[stepIdx]} (${elapsed}s)`)
 
         const pollRes = await fetch(`${API_BASE}/api/job/${jobId}`)
         const pollData = await readApiPayload(pollRes)
@@ -195,6 +256,7 @@ function App() {
       setError(err.message || 'Request failed')
     } finally {
       setLoading(false)
+      setLoadingStep(0)
       setLoadingMsg('Generating...')
     }
   }
@@ -263,10 +325,7 @@ function App() {
         <section className="hero">
           <p className="kicker">MIRRORUI</p>
           <h1>Website Reconstruction Lab</h1>
-          <p>
-            Generate editable React + Tailwind from a URL, compare against captured reference, and benchmark
-            Simple/Medium/Complex tiers.
-          </p>
+          <p>Generate pixel-faithful editable React + Tailwind from any URL. Benchmark across Simple / Medium / Complex tiers.</p>
         </section>
 
         <form onSubmit={onGenerate} className="controls">
@@ -280,91 +339,85 @@ function App() {
               required
             />
             <button type="submit" disabled={loading}>
-              {loading ? loadingMsg : 'Generate'}
+              {loading ? '⏳ ' + loadingMsg : '▶ Generate'}
             </button>
           </div>
           <div className="actions">
-            <button type="button" onClick={loadGeneratedPreview} className="secondary">
-              Refresh Preview
-            </button>
-            <button type="button" onClick={refreshLayoutAndCode} className="secondary">
-              Refresh Graph/Code
-            </button>
+            <button type="button" onClick={loadGeneratedPreview} className="secondary">↻ Preview</button>
+            <button type="button" onClick={refreshLayoutAndCode} className="secondary">↻ Graph/Code</button>
             <button type="button" onClick={onRunBenchmarks} className="secondary" disabled={benchmarkLoading}>
-              {benchmarkLoading ? 'Running Benchmarks...' : 'Run 3-Tier Benchmark'}
+              {benchmarkLoading ? 'Running…' : '📊 Benchmark'}
             </button>
-            <a href={`${API_BASE}/api/export`} target="_blank" rel="noreferrer" className="secondary link-btn">
-              Export Zip
-            </a>
-            <a href={`${API_BASE}/docs`} target="_blank" rel="noreferrer" className="secondary link-btn">
-              API Docs
-            </a>
+            <a href={`${API_BASE}/api/export`} target="_blank" rel="noreferrer" className="secondary link-btn">⬇ Export Zip</a>
+            <a href={`${API_BASE}/api/screenshot`} target="_blank" rel="noreferrer" className="secondary link-btn">📸 Screenshot</a>
+            <a href={`${API_BASE}/docs`} target="_blank" rel="noreferrer" className="secondary link-btn">📖 API Docs</a>
           </div>
         </form>
 
-        {error && <div className="error">{error}</div>}
+        {/* Progress stepper shown while loading */}
+        {loading && (
+          <div className="progress-stepper" role="status" aria-live="polite">
+            {GENERATION_STEPS.map((step, idx) => (
+              <div key={step} className={`progress-step ${idx < loadingStep ? 'done' : idx === loadingStep ? 'active' : ''}`}>
+                <span className="step-dot" />
+                <span className="step-label">{step}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {error && <div className="error" role="alert">{error}</div>}
 
         {result?.warnings?.length ? (
           <section className="warning-panel">
-            <h2>Generation Warnings</h2>
-            <ul>
-              {result.warnings.map((w) => (
-                <li key={w}>{w}</li>
-              ))}
-            </ul>
-            {result.challenge_detected ? <p>Challenge hint: {result.challenge_reason || 'detected'}</p> : null}
+            <h2>⚠ Warnings</h2>
+            <ul>{result.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
+            {result.challenge_detected ? <p className="hint">Hint: {result.challenge_reason || 'challenge detected'}</p> : null}
           </section>
         ) : null}
 
         {result && (
           <section className="result">
-            <p>
-              <strong>Page Title:</strong> {result.title || 'Unknown'}
-            </p>
-            <p>
-              <strong>Files Written:</strong> {generatedCount}
-            </p>
-            <p>
-              <strong>SSIM:</strong> {result.metrics?.ssim ?? 'n/a'} | <strong>Style:</strong>{' '}
-              {result.metrics?.visual_style_similarity ?? 'n/a'} | <strong>Structure:</strong>{' '}
-              {result.metrics?.structure_similarity ?? 'n/a'}
-            </p>
-            <p>
-              <strong>Text Accuracy:</strong> {result.metrics?.text_accuracy ?? 'n/a'} | <strong>Key Recall:</strong>{' '}
-              {result.metrics?.key_element_recall ?? 'n/a'} | <strong>A11y:</strong>{' '}
-              {result.metrics?.accessibility_score ?? 'n/a'}
-            </p>
-            <p>
-              <strong>Single Pass:</strong> {result.comparison?.single_pass_quality ?? 'n/a'} |{' '}
-              <strong>Dual Pass:</strong> {result.comparison?.dual_pass_quality ?? 'n/a'} | <strong>Improvement:</strong>{' '}
-              {result.comparison?.improvement ?? 'n/a'}
-            </p>
+            <div className="result-header">
+              <span><strong>{result.title || 'Untitled'}</strong></span>
+              <span className="hint">{generatedCount} file{generatedCount !== 1 ? 's' : ''} written</span>
+            </div>
+            <div className="metrics-row">
+              <MetricBadge label="SSIM" value={result.metrics?.ssim} />
+              <MetricBadge label="Style" value={result.metrics?.visual_style_similarity} />
+              <MetricBadge label="Structure" value={result.metrics?.structure_similarity} />
+              <MetricBadge label="Text" value={result.metrics?.text_accuracy} />
+              <MetricBadge label="Recall" value={result.metrics?.key_element_recall} />
+              <MetricBadge label="A11y" value={result.metrics?.accessibility_score} />
+            </div>
+            <div className="metrics-row">
+              <MetricBadge label="Single pass" value={result.comparison?.single_pass_quality} />
+              <MetricBadge label="Dual pass" value={result.comparison?.dual_pass_quality} />
+              <MetricBadge label="Δ Improvement" value={result.comparison?.improvement} />
+            </div>
           </section>
         )}
 
         {benchmarkResult?.summary ? (
           <section className="benchmark-panel">
-            <h2>3-Tier Benchmark Summary</h2>
-            <p>
-              <strong>Mean SSIM:</strong> {benchmarkResult.summary.mean?.ssim ?? 'n/a'} | <strong>Mean Text:</strong>{' '}
-              {benchmarkResult.summary.mean?.text_accuracy ?? 'n/a'} | <strong>Mean Key Recall:</strong>{' '}
-              {benchmarkResult.summary.mean?.key_element_recall ?? 'n/a'}
-            </p>
+            <h2>3-Tier Benchmark</h2>
+            <div className="metrics-row">
+              <MetricBadge label="Mean SSIM" value={benchmarkResult.summary.mean?.ssim} />
+              <MetricBadge label="Mean Text" value={benchmarkResult.summary.mean?.text_accuracy} />
+              <MetricBadge label="Mean Recall" value={benchmarkResult.summary.mean?.key_element_recall} />
+            </div>
             <div className="benchmark-table-wrap">
               <table className="benchmark-table">
                 <thead>
-                  <tr>
-                    <th>Site</th>
-                    <th>Score</th>
-                    <th>Challenge</th>
-                  </tr>
+                  <tr><th>Site</th><th>Score</th><th>Nodes</th><th>Challenge</th></tr>
                 </thead>
                 <tbody>
                   {(benchmarkResult.summary.ranked || []).map((row) => (
                     <tr key={row.site}>
                       <td>{row.site}</td>
-                      <td>{row.score}</td>
-                      <td>{benchmarkResult.runs?.[row.site]?.challenge_detected ? 'Yes' : 'No'}</td>
+                      <td>{Math.round(row.score * 100)}%</td>
+                      <td>{benchmarkResult.runs?.[row.site]?.metrics?.recreated_nodes ?? '—'}</td>
+                      <td>{benchmarkResult.runs?.[row.site]?.challenge_detected ? '⚠ Yes' : '✓ No'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -374,36 +427,36 @@ function App() {
         ) : null}
 
         <section className="workspace-grid">
-          <article className="preview compare-workspace" onClick={onPreviewClick}>
+          {/* Compare workspace — full width row */}
+          <article className="compare-workspace" onClick={onPreviewClick}>
             <div className="compare-head">
               <h2>Compare Workspace</h2>
               <div className="compare-controls">
                 <label>
                   Mode
                   <select value={compareMode} onChange={(e) => setCompareMode(e.target.value)}>
+                    <option value="side">Side-by-Side</option>
                     <option value="overlay">Overlay</option>
                     <option value="recreated">Recreated Only</option>
-                    <option value="side">Side-by-Side</option>
                   </select>
                 </label>
-                <label>
-                  Overlay
-                  <input
-                    type="range"
-                    min="0"
-                    max="0.35"
-                    step="0.01"
-                    value={overlayOpacity}
-                    onChange={(e) => setOverlayOpacity(Number(e.target.value))}
-                  />
-                </label>
+                {compareMode === 'overlay' && (
+                  <label>
+                    Opacity
+                    <input
+                      type="range" min="0" max="0.35" step="0.01"
+                      value={overlayOpacity}
+                      onChange={(e) => setOverlayOpacity(Number(e.target.value))}
+                    />
+                  </label>
+                )}
               </div>
             </div>
-            <p className="hint">Click in recreated view to select/edit nodes. Use side-by-side to inspect fidelity quickly.</p>
+            <p className="hint">Click nodes in the recreated view to select them for editing.</p>
 
-            {!GeneratedComponent ? <p>Run generation to load the preview.</p> : null}
+            {!GeneratedComponent && <p className="hint">Run generation to load the preview.</p>}
 
-            {GeneratedComponent && compareMode !== 'side' ? (
+            {GeneratedComponent && compareMode !== 'side' && (
               <div className="preview-stage">
                 <GeneratedComponent
                   selectedNodeId={selectedNodeId}
@@ -411,60 +464,79 @@ function App() {
                   referenceOpacity={overlayOpacity}
                 />
               </div>
-            ) : null}
+            )}
 
-            {GeneratedComponent && compareMode === 'side' ? (
+            {GeneratedComponent && compareMode === 'side' && (
               <div className="split-compare">
                 <div className="reference-pane">
                   <h3>Reference Capture</h3>
                   <img src={screenshotUrl} alt="Reference website capture" />
                 </div>
                 <div className="recreated-pane">
-                  <h3>Recreated Editable UI</h3>
+                  <h3>Recreated (Editable)</h3>
                   <GeneratedComponent selectedNodeId={selectedNodeId} showReferenceOverlay={false} referenceOpacity={0} />
                 </div>
               </div>
-            ) : null}
+            )}
           </article>
 
+          {/* Node editor */}
           <article className="editor-panel">
             <h2>Node Editor</h2>
-            <p className="hint">Selected Node: {selectedNodeId || 'none'}</p>
+            {selectedNodeId ? (
+              <>
+                <p className="hint selected-node-id" title={selectedNodeId}>
+                  🎯 {selectedNodeId}
+                </p>
+                {selectedNode && (
+                  <div className="node-preview-info">
+                    <span className="node-tag-badge">&lt;{selectedNode.tag}&gt;</span>
+                    {selectedNode.text && <span className="node-text-preview">{selectedNode.text.slice(0, 60)}</span>}
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="hint">Click a node in the preview to select it.</p>
+            )}
             <form onSubmit={onApplyEdit} className="editor-form">
-              <label htmlFor="node-text">Text</label>
+              <label htmlFor="node-text">Text content</label>
               <textarea
                 id="node-text"
                 value={editor.text}
                 onChange={(e) => setEditor((prev) => ({ ...prev, text: e.target.value }))}
+                placeholder="Inner text…"
               />
               <label htmlFor="node-href">Link (href)</label>
               <input
                 id="node-href"
                 value={editor.href}
                 onChange={(e) => setEditor((prev) => ({ ...prev, href: e.target.value }))}
+                placeholder="https://…"
               />
               <label htmlFor="node-image">Image src</label>
               <input
                 id="node-image"
                 value={editor.image_src}
                 onChange={(e) => setEditor((prev) => ({ ...prev, image_src: e.target.value }))}
+                placeholder="https://…/image.png"
               />
               <label htmlFor="node-class">Tailwind classes</label>
               <input
                 id="node-class"
                 value={editor.class_name}
                 onChange={(e) => setEditor((prev) => ({ ...prev, class_name: e.target.value }))}
+                placeholder="bg-blue-500 text-white…"
               />
               <button type="submit" disabled={!selectedNodeId || loading}>
-                Apply Edit + Regenerate
+                ✎ Apply &amp; Regenerate
               </button>
             </form>
           </article>
 
+          {/* Tabbed code viewer */}
           <article className="code-panel">
             <h2>Generated Code</h2>
-            <p className="hint">{Object.keys(codeFiles).length} files</p>
-            <pre>{codeFiles['src/components/generated/AppBody.jsx'] || 'Generate to view code.'}</pre>
+            <CodeTabs files={codeFiles} />
           </article>
         </section>
       </main>

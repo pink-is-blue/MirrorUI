@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -15,9 +16,12 @@ STEALTH_INIT_SCRIPT = """
     Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
     Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
     Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4] });
-    window.chrome = window.chrome || { runtime: {} };
+    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+    Object.defineProperty(navigator, 'vendor', { get: () => 'Google Inc.' });
+    Object.defineProperty(navigator, 'appVersion', { get: () => '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36' });
+    window.chrome = window.chrome || { runtime: {}, loadTimes: () => ({}), csi: () => ({}), app: {} };
 
+    // Hide automation from Permissions API
     const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
     if (originalQuery) {
         window.navigator.permissions.query = (parameters) => (
@@ -25,6 +29,23 @@ STEALTH_INIT_SCRIPT = """
                 ? Promise.resolve({ state: Notification.permission })
                 : originalQuery(parameters)
         );
+    }
+
+    // Overwrite iframe contentWindow.navigator.webdriver
+    try {
+        const iframe = document.createElement('iframe');
+        document.body.appendChild(iframe);
+        const iframeNav = Object.getOwnPropertyDescriptor(iframe.contentWindow, 'navigator');
+        if (iframeNav) {
+            Object.defineProperty(iframe.contentWindow, 'navigator', { ...iframeNav, configurable: true });
+        }
+        document.body.removeChild(iframe);
+    } catch (e) {}
+
+    // Suppress console warnings from bot-detection libraries
+    const _noop = () => {};
+    if (!window.__mirrorui_stealth__) {
+        window.__mirrorui_stealth__ = true;
     }
 }
 """
@@ -283,6 +304,8 @@ class PlaywrightRenderer:
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
+                "--disable-web-security",
+                "--disable-features=IsolateOrigins,site-per-process",
             ],
         )
 
@@ -298,9 +321,15 @@ class PlaywrightRenderer:
                 "Chrome/123.0.0.0 Safari/537.36"
             ),
             extra_http_headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
                 "Accept-Language": strategy.get("accept_lang", "en-US,en;q=0.9"),
+                "Accept-Encoding": "gzip, deflate, br",
                 "Upgrade-Insecure-Requests": "1",
                 "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+                "Sec-Ch-Ua": '"Chromium";v="123", "Not:A-Brand";v="8"',
+                "Sec-Ch-Ua-Mobile": "?0",
+                "Sec-Ch-Ua-Platform": '"Windows"',
                 "Sec-Fetch-Dest": "document",
                 "Sec-Fetch-Mode": "navigate",
                 "Sec-Fetch-Site": "none",
@@ -322,40 +351,63 @@ class PlaywrightRenderer:
 
         if strategy.get("wait_idle", True):
             try:
-                await page.wait_for_load_state("networkidle", timeout=7000)
+                await page.wait_for_load_state("networkidle", timeout=8000)
             except Exception:
                 pass
 
+        # Human-like initial pause
         try:
-            await page.wait_for_timeout(1400)
+            await page.wait_for_timeout(800 + random.randint(200, 600))
         except Exception:
             pass
 
-        # Trigger lazy content and then return to top for stable screenshot.
+        # Attempt to dismiss cookie/consent banners with a wide selector set
+        consent_texts = (
+            "Accept all", "Accept All", "Accept All Cookies", "Accept cookies",
+            "I agree", "Agree", "Agree & Continue", "Allow all", "Allow All",
+            "OK", "Got it", "Close", "Dismiss", "Continue", "Consent",
+            "Accept", "Yes, I Accept",
+        )
+        for text in consent_texts:
+            try:
+                await page.locator(
+                    "button, [role='button'], a[href='#'], input[type='button'], input[type='submit']"
+                ).filter(has_text=text).first.click(timeout=600)
+                await page.wait_for_timeout(300)
+            except Exception:
+                pass
+
+        # Human-like scroll: wander down the page to trigger lazy-load, then return to top
         try:
             last_height = 0
-            for step in range(10):
-                await page.mouse.wheel(0, 950)
-                await page.wait_for_timeout(230)
+            for step in range(12):
+                delta = random.randint(700, 1100)
+                await page.mouse.wheel(0, delta)
+                await page.wait_for_timeout(150 + random.randint(50, 200))
                 current_height = await page.evaluate("() => document.documentElement.scrollHeight")
-                if current_height == last_height and step > 3:
+                if current_height == last_height and step > 4:
                     break
                 last_height = current_height
+
+            # Random mouse movement to mimic human presence
+            for _ in range(4):
+                x = random.randint(200, 1300)
+                y = random.randint(100, 800)
+                await page.mouse.move(x, y)
+                await page.wait_for_timeout(random.randint(60, 150))
+
             await page.evaluate("window.scrollTo(0, 0)")
-            await page.wait_for_timeout(700)
+            await page.wait_for_timeout(500 + random.randint(100, 400))
         except Exception:
             pass
 
-        for text in ("Accept", "I agree", "Agree", "OK", "Allow all"):
+        try:
+            await page.screenshot(path=str(screenshot_path), full_page=True, timeout=25000)
+        except Exception:
             try:
-                await page.locator("button, [role='button']").filter(has_text=text).first.click(timeout=700)
+                await page.screenshot(path=str(screenshot_path), full_page=False, timeout=12000)
             except Exception:
                 pass
-
-        try:
-            await page.screenshot(path=str(screenshot_path), full_page=True, timeout=20000)
-        except Exception:
-            await page.screenshot(path=str(screenshot_path), full_page=False, timeout=10000)
 
         try:
             title = await page.title()

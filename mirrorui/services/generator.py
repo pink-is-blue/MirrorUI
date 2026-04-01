@@ -102,10 +102,14 @@ export default function SectionList() {
         viewport = extracted.get("viewport", {})
         root = self._pick_root(nodes, viewport)
         root_box = root.get("box", {}) if root else {}
-        root_x = float(root_box.get("x", 0.0))
-        root_y = float(root_box.get("y", 0.0))
-        page_width = max(float(root_box.get("width", 0.0)), float(viewport.get("width", 1440)), 320.0)
-        page_height = max(float(viewport.get("height", 1024)), 320.0)
+        # For body/html roots that sit at origin, don't apply a coordinate offset.
+        root_tag = (root or {}).get("tag", "")
+        root_x = float(root_box.get("x", 0.0)) if root_tag not in {"body", "html"} else 0.0
+        root_y = float(root_box.get("y", 0.0)) if root_tag not in {"body", "html"} else 0.0
+        page_width = max(float(root_box.get("width", 0.0)), float(viewport.get("width", 1512)), 320.0)
+        # Use actual DOM extent as page height (captures scrollable content below viewport).
+        dom_height = self._estimate_page_height(nodes, root_y)
+        page_height = max(dom_height, float(viewport.get("height", 982)), 320.0)
 
         children_by_parent: Dict[str, List[str]] = {}
         node_by_id: Dict[str, Dict[str, Any]] = {}
@@ -114,7 +118,7 @@ export default function SectionList() {
             children_by_parent.setdefault(parent_id, []).append(node.get("node_id", ""))
             node_by_id[node.get("node_id", "")] = node
 
-        budget = 650 if dense else 420
+        budget = 1000 if dense else 750
         rendered = 0
 
         root_id = root.get("node_id", "")
@@ -218,7 +222,7 @@ export default function SectionList() {
         ranked = sorted(nodes, key=lambda n: float(n.get("importance", 0.0)), reverse=True)
         children: List[Dict[str, Any]] = []
 
-        for node in ranked[:180]:
+        for node in ranked[:300]:
             if not self._should_keep(node, dense=True):
                 continue
             box = node.get("box", {})
@@ -374,7 +378,16 @@ export default function SectionList() {
             "borderRadius", "borderWidth", "borderStyle", "borderColor", "boxShadow", "lineHeight", "letterSpacing",
             "textAlign", "textDecoration", "textTransform", "opacity", "overflow", "overflowX", "overflowY", "objectFit", "left", "top", "right", "bottom", "zIndex"
         ]
-        return {key: str(styles.get(key, "")) for key in allowed if styles.get(key) not in {None, ""}}
+        result: Dict[str, str] = {}
+        for key in allowed:
+            value = styles.get(key)
+            if value not in {None, ""}:
+                v = str(value)
+                # Strip surrounding quotes from font-family values (CSS returns them quoted).
+                if key == "fontFamily":
+                    v = v.strip("'\"")
+                result[key] = v
+        return result
 
     def _pick_root_background(self, root: Dict[str, Any], nodes: List[Dict[str, Any]]) -> str:
         root_styles = (root or {}).get("styles", {})

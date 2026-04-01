@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 
 const VOID_TAGS = new Set(['img', 'input'])
 
@@ -164,27 +164,57 @@ function MirrorNode({ node, selectedNodeId, isRoot = false }) {
 }
 
 export default function MirrorRenderer({ pageData, selectedNodeId = '', showReferenceOverlay = true, referenceOpacity = 0.08 }) {
+  const frameRef = useRef(null)
+  const [scale, setScale] = useState(1)
+
+  const pageWidth = Math.max(pageData?.width || 1440, 320)
+  const pageHeight = Math.max(pageData?.height || 900, 200)
+
+  useEffect(() => {
+    if (!frameRef.current) return
+    const obs = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      const containerWidth = entry.contentRect.width
+      if (containerWidth > 0) {
+        setScale(containerWidth / pageWidth)
+      }
+    })
+    obs.observe(frameRef.current)
+    return () => obs.disconnect()
+  }, [pageWidth])
+
   if (!pageData?.root) {
     return null
   }
 
-  const width = Math.max(pageData.width || 1440, 320)
-  const height = Math.max(pageData.height || 900, 200)
-
   return (
     <div className="mirror-stage">
-      <div className="mirror-frame">
-        <div
-          className="mirror-canvas"
-          style={{
-            aspectRatio: `${width} / ${height}`,
-            backgroundColor: pageData.backgroundColor || 'rgb(255, 255, 255)',
-          }}
-        >
-          {pageData.screenshotUrl && showReferenceOverlay ? (
-            <img className="mirror-reference" src={pageData.screenshotUrl} alt="" aria-hidden="true" style={{ opacity: referenceOpacity }} />
-          ) : null}
-          <MirrorNode node={pageData.root} selectedNodeId={selectedNodeId} isRoot />
+      <div className="mirror-frame" ref={frameRef}>
+        {/* Outer wrapper collapses to the scaled height so the parent flow is correct */}
+        <div style={{ width: '100%', height: `${Math.round(pageHeight * scale)}px`, overflow: 'hidden', position: 'relative' }}>
+          <div
+            className="mirror-canvas"
+            style={{
+              width: `${pageWidth}px`,
+              minHeight: `${pageHeight}px`,
+              backgroundColor: pageData.backgroundColor || 'rgb(255, 255, 255)',
+              transformOrigin: 'top left',
+              transform: `scale(${scale})`,
+              position: 'relative',
+            }}
+          >
+            {pageData.screenshotUrl && showReferenceOverlay ? (
+              <img
+                className="mirror-reference"
+                src={pageData.screenshotUrl}
+                alt=""
+                aria-hidden="true"
+                style={{ opacity: referenceOpacity, width: '100%', height: '100%' }}
+              />
+            ) : null}
+            <MirrorNode node={pageData.root} selectedNodeId={selectedNodeId} isRoot />
+          </div>
         </div>
       </div>
     </div>

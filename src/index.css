@@ -176,8 +176,32 @@ button:disabled {
   margin-top: 1rem;
   display: grid;
   gap: 1rem;
-  grid-template-columns: minmax(0, 1fr) 280px;
+  /* compare workspace full-width, then editor + code side-by-side */
+  grid-template-columns: 1fr;
   align-items: start;
+}
+
+/* Editor + code side-by-side below the compare area */
+.workspace-grid .editor-panel {
+  grid-column: 1;
+}
+.workspace-grid .code-panel {
+  grid-column: 1;
+}
+
+@supports (grid-template-rows: auto) {
+  .workspace-grid {
+    grid-template-columns: 300px minmax(0, 1fr);
+  }
+  .workspace-grid .compare-workspace {
+    grid-column: 1 / -1;
+  }
+  .workspace-grid .editor-panel {
+    grid-column: 1;
+  }
+  .workspace-grid .code-panel {
+    grid-column: 2;
+  }
 }
 
 .editor-panel,
@@ -294,7 +318,8 @@ button:disabled {
   position: relative;
   width: 100%;
   min-height: 560px;
-  overflow: hidden;
+  overflow: visible;
+  transform-origin: top left;
 }
 
 .mirror-reference {
@@ -316,7 +341,7 @@ button:disabled {
   outline-offset: 1px;
 }
 
-.code-panel pre {
+.code-panel pre, .code-view {
   margin: 0;
   max-height: 460px;
   overflow: auto;
@@ -352,6 +377,184 @@ button:disabled {
 
 .result ul {
   margin: 0.4rem 0 0;
+}
+
+/* Result header */
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+/* Metric badges */
+.metrics-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+
+.metric-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid var(--badge-color, #64748b);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  background: color-mix(in srgb, var(--badge-color, #64748b) 10%, white);
+}
+
+.metric-label {
+  color: #475569;
+  font-weight: 600;
+}
+
+.metric-value {
+  color: var(--badge-color, #64748b);
+  font-weight: 700;
+}
+
+/* Progress stepper */
+.progress-stepper {
+  margin: 0.8rem 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.8rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid #c9cfdb;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.progress-step {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.progress-step.done {
+  color: #16a34a;
+}
+
+.progress-step.active {
+  color: #1e7569;
+  font-weight: 700;
+}
+
+.step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.progress-step.active .step-dot {
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* Code tabs */
+.code-tabs-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.code-tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+
+.code-tab {
+  background: #e2e8f0;
+  color: #334155;
+  border: none;
+  border-radius: 8px 8px 0 0;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: auto;
+}
+
+.code-tab:hover {
+  background: #cbd5e1;
+}
+
+.code-tab-active {
+  background: #111827;
+  color: #e5e7eb;
+}
+
+.code-view {
+  margin: 0;
+  max-height: 500px;
+  overflow: auto;
+  background: #111827;
+  color: #e5e7eb;
+  border-radius: 0 10px 10px 10px;
+  padding: 0.85rem;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: pre;
+  word-break: normal;
+}
+
+/* Node editor improvements */
+.selected-node-id {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
+.node-preview-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.node-tag-badge {
+  background: #dbeafe;
+  color: #1e40af;
+  border-radius: 6px;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.node-text-preview {
+  color: #64748b;
+  font-size: 0.82rem;
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+/* compare-workspace border/bg */
+.compare-workspace {
+  border: 1px solid #c9cfdb;
+  border-radius: 14px;
+  padding: 0.9rem;
+  background: rgba(248, 250, 252, 0.96);
 }
 
 @media (max-width: 760px) {
