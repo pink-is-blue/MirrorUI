@@ -110,6 +110,16 @@ async def get_layout() -> Dict[str, Any]:
     return {"ok": True, "layout": payload}
 
 
+@app.get("/api/page-data")
+async def get_page_data() -> Dict[str, Any]:
+    """Return the full pageData tree used by MirrorRenderer (width, height, root, etc.)."""
+    path = pipeline.state.work_dir / "page_data.json"
+    if not path.exists():
+        return JSONResponse({"error": "No generated page data yet."}, status_code=404)
+    import json as _json
+    return {"ok": True, "pageData": _json.loads(path.read_text(encoding="utf-8"))}
+
+
 @app.get("/api/code")
 async def get_generated_code() -> Dict[str, Any]:
     generated_root = FRONTEND / "src" / "components" / "generated"

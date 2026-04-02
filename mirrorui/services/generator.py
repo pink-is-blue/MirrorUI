@@ -95,6 +95,7 @@ export default function SectionList() {
             "src/components/generated/SectionList.jsx": section_list,
             "src/components/generated/generation.meta.js": metadata,
             "workspace/generated/layout.json": layout_json,
+            "workspace/generated/page_data.json": page_json,
         }
 
     def _build_page_model(self, extracted: Dict[str, Any], dense: bool) -> Dict[str, Any]:
